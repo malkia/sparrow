@@ -25,15 +25,22 @@ namespace sparrow
     {
         primitive_array<std::uint16_t> pr0(
             std::ranges::iota_view{std::size_t(0), std::size_t(data_size)}
-            | std::views::transform(
-                [](auto i)
-                {
-                    return static_cast<std::uint16_t>(i);
-                }
-            )
+                | std::views::transform(
+                    [](auto i)
+                    {
+                        return static_cast<std::uint16_t>(i);
+                    }
+                ),
+            "column0"
         );
-        primitive_array<std::int32_t> pr1(std::ranges::iota_view{std::int32_t(4), 4 + std::int32_t(data_size)});
-        primitive_array<std::int32_t> pr2(std::ranges::iota_view{std::int32_t(2), 2 + std::int32_t(data_size)});
+        primitive_array<std::int32_t> pr1(
+            std::ranges::iota_view{std::int32_t(4), 4 + std::int32_t(data_size)},
+            "column1"
+        );
+        primitive_array<std::int32_t> pr2(
+            std::ranges::iota_view{std::int32_t(2), 2 + std::int32_t(data_size)},
+            "column2"
+        );
 
         std::vector<array> arr_list = {array(std::move(pr0)), array(std::move(pr1)), array(std::move(pr2))};
         return arr_list;
@@ -70,6 +77,21 @@ namespace sparrow
                 record_batch record = {{"first", col_list[0]}, {"second", col_list[1]}, {"third", col_list[2]}};
                 CHECK_EQ(record.nb_columns(), 3u);
                 CHECK_EQ(record.nb_rows(), 10u);
+            }
+
+            SUBCASE("from column list")
+            {
+                record_batch record(make_array_list(col_size));
+                CHECK_EQ(record.nb_columns(), 3u);
+                CHECK_EQ(record.nb_rows(), 10u);
+                CHECK_FALSE(std::ranges::equal(record.names(), make_name_list()));
+            }
+
+            SUBCASE("from struct array")
+            {
+                record_batch record0(struct_array(make_array_list(col_size)));
+                record_batch record1(make_array_list(col_size));
+                CHECK_EQ(record0, record1);
             }
         }
 
@@ -161,6 +183,49 @@ namespace sparrow
             auto columns = record.columns();
 
             bool res = std::ranges::equal(columns, col_list);
+            CHECK(res);
+        }
+
+        TEST_CASE("extract_struct_array")
+        {
+            struct_array arr(make_array_list(col_size));
+            struct_array control(arr);
+
+            record_batch r(std::move(arr));
+            auto extr = r.extract_struct_array();
+            CHECK_EQ(extr, control);
+        }
+
+        TEST_CASE("add_column")
+        {
+            auto record = make_record_batch(col_size);
+            primitive_array<std::int32_t> pr3(
+                std::ranges::iota_view{std::int32_t(3), 3 + std::int32_t(col_size)},
+                "column3"
+            );
+
+            auto ctrl = pr3;
+
+            record.add_column(array(std::move(pr3)));
+            std::vector<std::string> ctrl_name_list = make_name_list();
+            ctrl_name_list.push_back("column3");
+            std::vector<std::string> name_list(record.names().begin(), record.names().end());
+            CHECK_EQ(name_list, ctrl_name_list);
+
+            const auto& col3 = record.get_column(3);
+            bool res = col3.visit(
+                [&ctrl]<typename T>(const T& arg)
+                {
+                    if constexpr (std::same_as<primitive_array<std::int32_t>, T>)
+                    {
+                        return arg == ctrl;
+                    }
+                    else
+                    {
+                        return false;
+                    }
+                }
+            );
             CHECK(res);
         }
 

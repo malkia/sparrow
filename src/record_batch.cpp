@@ -31,22 +31,39 @@ namespace sparrow
             m_array_list.push_back(std::move(array));
         }
 
-        init_array_map();
-        SPARROW_ASSERT_TRUE(check_consistency());
+        update_array_map_cache();
+    }
+
+    record_batch::record_batch(struct_array&& arr)
+    {
+        SPARROW_ASSERT_TRUE(owns_arrow_array(arr));
+        SPARROW_ASSERT_TRUE(owns_arrow_schema(arr));
+
+        auto [struct_arr, struct_sch] = extract_arrow_structures(std::move(arr));
+        auto n_children = static_cast<std::size_t>(struct_arr.n_children);
+        m_name_list.reserve(n_children);
+        m_array_list.reserve(n_children);
+        for (std::size_t i = 0; i < n_children; ++i)
+        {
+            array arr(move_array(*(struct_arr.children[i])), move_schema(*(struct_sch.children[i])));
+            m_name_list.push_back(std::string(arr.name().value()));
+            m_array_list.push_back(std::move(arr));
+        }
+        update_array_map_cache();
     }
 
     record_batch::record_batch(const record_batch& rhs)
         : m_name_list(rhs.m_name_list)
         , m_array_list(rhs.m_array_list)
     {
-        init_array_map();
+        update_array_map_cache();
     }
 
     record_batch& record_batch::operator=(const record_batch& rhs)
     {
         m_name_list = rhs.m_name_list;
         m_array_list = rhs.m_array_list;
-        init_array_map();
+        update_array_map_cache();
         return *this;
     }
 
@@ -62,6 +79,7 @@ namespace sparrow
 
     bool record_batch::contains_column(const name_type& name) const
     {
+        update_array_map_cache();
         return m_array_map.contains(name);
     }
 
@@ -73,6 +91,7 @@ namespace sparrow
 
     const array& record_batch::get_column(const name_type& name) const
     {
+        update_array_map_cache();
         const auto iter = m_array_map.find(name);
         if (iter == m_array_map.end())
         {
@@ -97,14 +116,50 @@ namespace sparrow
         return std::ranges::ref_view(m_array_list);
     }
 
-    void record_batch::init_array_map()
+    struct_array record_batch::extract_struct_array()
     {
-        m_array_map.clear();
-        m_array_map.reserve(m_name_list.size());
-        for (size_t i = 0; i < m_name_list.size(); ++i)
+        for (std::size_t i = 0; i < m_name_list.size(); ++i)
         {
-            m_array_map.try_emplace(m_name_list[i], &(m_array_list[i]));
+            m_array_list[i].set_name(m_name_list[i]);
         }
+        m_array_map.clear();
+        return struct_array(std::move(m_array_list));
+    }
+
+    void record_batch::add_column(name_type name, array column)
+    {
+        m_name_list.push_back(std::move(name));
+        m_array_list.push_back(std::move(column));
+        m_dirty_map = true;
+    }
+
+    void record_batch::add_column(array column)
+    {
+        auto opt_col_name = column.name();
+        SPARROW_ASSERT_TRUE(opt_col_name.has_value());
+        std::string name(opt_col_name.value());
+        add_column(std::move(name), std::move(column));
+    }
+
+    void record_batch::update_array_map_cache() const
+    {
+        if (!m_dirty_map)
+        {
+            return;
+        }
+
+        // Columns can only be appened, so update the map
+        // in reverse order and stops when it finds a name
+        // already contained in it.
+        for (std::size_t i = m_name_list.size(); i != 0; --i)
+        {
+            if (!m_array_map.try_emplace(m_name_list[i - 1], &(m_array_list[i - 1])).second)
+            {
+                break;
+            }
+        }
+        m_dirty_map = false;
+        SPARROW_ASSERT_TRUE(check_consistency());
     }
 
     bool record_batch::check_consistency() const
@@ -113,6 +168,9 @@ namespace sparrow
             m_name_list.size() == m_array_list.size(),
             "The size of the names and of the array list must be the same"
         );
+
+        auto iter = std::find(m_name_list.begin(), m_name_list.end(), "");
+        SPARROW_ASSERT(iter == m_name_list.end(), "A column can not have an empty name");
 
         const auto unique_names = std::unordered_set<name_type>(m_name_list.begin(), m_name_list.end());
         SPARROW_ASSERT(unique_names.size() == m_name_list.size(), "The names of the columns must be unique");

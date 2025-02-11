@@ -31,9 +31,12 @@
 #include <sparrow/layout/list_layout/list_array.hpp>
 #include <sparrow/layout/primitive_array.hpp>
 #include <sparrow/layout/struct_layout/struct_array.hpp>
+#include <sparrow/layout/temporal/date_array.hpp>
 #include <sparrow/layout/union_array.hpp>
 #include <sparrow/layout/variable_size_binary_layout/variable_size_binary_array.hpp>
 #include <sparrow/utils/ranges.hpp>
+
+#include "sparrow/layout/temporal/interval_array.hpp"
 
 namespace sparrow
 {
@@ -118,6 +121,12 @@ namespace sparrow
                                                  && std::is_scalar_v<ensured_range_value_t<T>>;
 
         template <typename T>
+        concept translates_to_date_layout = std::ranges::input_range<T>
+                                            && mpl::any_of(
+                                                date_types_t{},
+                                                mpl::predicate::same_as<ensured_range_value_t<T>>{}
+                                            );
+        template <typename T>
         concept translates_to_duration_layout = std::ranges::input_range<T>
                                                 && mpl::any_of(
                                                     duration_types_t{},
@@ -126,6 +135,14 @@ namespace sparrow
         template <typename T>
         concept translates_to_timestamp_layout = std::ranges::input_range<T>
                                                  && mpl::is_type_instance_of_v<ensured_range_value_t<T>, timestamp>;
+
+
+        template <typename T>
+        concept translates_to_interval_layout = std::ranges::input_range<T>
+                                                && mpl::any_of(
+                                                    interval_types_t{},
+                                                    mpl::predicate::same_as<ensured_range_value_t<T>>{}
+                                                );
 
         template <class T>
         concept translate_to_variable_sized_list_layout = std::ranges::input_range<T>
@@ -187,6 +204,18 @@ namespace sparrow
             }
         };
 
+        template <translates_to_date_layout T, class OPTION_FLAGS>
+        struct builder<T, dont_enforce_layout, OPTION_FLAGS>
+        {
+            using type = sparrow::date_array<ensured_range_value_t<T>>;
+
+            template <class U>
+            static type create(U&& t)
+            {
+                return type(std::forward<U>(t));
+            }
+        };
+
         template <translates_to_duration_layout T, class OPTION_FLAGS>
         struct builder<T, dont_enforce_layout, OPTION_FLAGS>
         {
@@ -220,6 +249,18 @@ namespace sparrow
                     }
                 }();
                 return type(tz, std::forward<U>(t));
+            }
+        };
+
+        template <translates_to_interval_layout T, class OPTION_FLAGS>
+        struct builder<T, dont_enforce_layout, OPTION_FLAGS>
+        {
+            using type = sparrow::interval_array<ensured_range_value_t<T>>;
+
+            template <class U>
+            static type create(U&& t)
+            {
+                return type(std::forward<U>(t));
             }
         };
 

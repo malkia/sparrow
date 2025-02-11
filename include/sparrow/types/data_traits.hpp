@@ -17,6 +17,8 @@
 #include <chrono>
 #include <concepts>
 
+#include "sparrow/layout/temporal/date_array.hpp"
+#include "sparrow/layout/temporal/interval_types.hpp"
 #include "sparrow/types/data_type.hpp"
 #include "sparrow/utils/nullable.hpp"
 #include "sparrow/utils/vector_view.hpp"
@@ -112,6 +114,18 @@ namespace sparrow
     };
 
     template <>
+    struct arrow_traits<date_days> : common_native_types_traits<date_days>
+    {
+        static constexpr data_type type_id = data_type::DATE_DAYS;
+    };
+
+    template <>
+    struct arrow_traits<date_milliseconds> : common_native_types_traits<date_milliseconds>
+    {
+        static constexpr data_type type_id = data_type::DATE_MILLISECONDS;
+    };
+
+    template <>
     struct arrow_traits<std::chrono::seconds> : common_native_types_traits<std::chrono::seconds>
     {
         static constexpr data_type type_id = data_type::DURATION_SECONDS;
@@ -165,6 +179,25 @@ namespace sparrow
         static constexpr data_type type_id = data_type::TIMESTAMP_NANOSECONDS;
         using value_type = timestamp<std::chrono::nanoseconds>;
         using const_reference = timestamp<std::chrono::nanoseconds>;
+    };
+
+    template <>
+    struct arrow_traits<chrono::months> : common_native_types_traits<chrono::months>
+    {
+        static constexpr data_type type_id = data_type::INTERVAL_MONTHS;
+    };
+
+    template <>
+    struct arrow_traits<days_time_interval> : common_native_types_traits<days_time_interval>
+    {
+        static constexpr data_type type_id = data_type::INTERVAL_DAYS_TIME;
+    };
+
+    template <>
+    struct arrow_traits<month_day_nanoseconds_interval>
+        : common_native_types_traits<month_day_nanoseconds_interval>
+    {
+        static constexpr data_type type_id = data_type::INTERVAL_MONTHS_DAYS_NANOSECONDS;
     };
 
     namespace detail

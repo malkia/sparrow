@@ -22,6 +22,7 @@
 #include <vector>
 
 #include "sparrow/array.hpp"
+#include "sparrow/layout/struct_layout/struct_array.hpp"
 #include "sparrow/utils/contracts.hpp"
 
 #if defined(__cpp_lib_format)
@@ -65,12 +66,31 @@ namespace sparrow
             requires(std::convertible_to<std::ranges::range_value_t<NR>, std::string> and std::same_as<std::ranges::range_value_t<CR>, array>)
         record_batch(NR&& names, CR&& columns);
 
+        /*
+         * Constructs a @ref record_batch from a range of arrays. Each array
+         * must have a name: if \c arr is an array, then \c arr.name(), must
+         * not return an empty string.
+         *
+         * @param comumns An input range of arrays
+         */
+        template <std::ranges::input_range CR>
+            requires std::same_as<std::ranges::range_value_t<CR>, array>
+        record_batch(CR&& columns);
+
         /**
          * Constructs a record_batch from a list of \c std::pair<name_type, array>.
          *
          * @param init a list of pair "name - array".
          */
         SPARROW_API record_batch(initializer_type init);
+
+        /**
+         * Construct a record batch from the given struct array.
+         * The array must owns its internal arrow structures.
+         *
+         * @param ar An input struct array
+         */
+        SPARROW_API record_batch(struct_array&& ar);
 
         SPARROW_API record_batch(const record_batch&);
         SPARROW_API record_batch& operator=(const record_batch&);
@@ -129,18 +149,43 @@ namespace sparrow
          */
         SPARROW_API column_range columns() const;
 
+        /**
+         * Moves the internal columns of the record batch into a struct_array
+         * object. The record batch is empty anymore after calling this
+         * method.
+         */
+        SPARROW_API struct_array extract_struct_array();
+
+        /**
+         * Appends the array \ref column to the record batch, and maps it with
+         * \ref name.
+         *
+         * @param name The name of the column to append.
+         * @param column The array to append.
+         */
+        SPARROW_API void add_column(name_type name, array column);
+
+        /**
+         * Appends the array \ref column to the record batch, and maps it to
+         * its internal name. \ref column must have a name.
+         *
+         * @param column The array to append.
+         */
+        SPARROW_API void add_column(array column);
+
     private:
 
         template <class U, class R>
         [[nodiscard]] std::vector<U> to_vector(R&& range) const;
 
-        SPARROW_API void init_array_map();
+        SPARROW_API void update_array_map_cache() const;
 
         [[nodiscard]] SPARROW_API bool check_consistency() const;
 
         std::vector<name_type> m_name_list;
         std::vector<array> m_array_list;
-        std::unordered_map<name_type, array*> m_array_map;
+        mutable std::unordered_map<name_type, const array*> m_array_map;
+        mutable bool m_dirty_map = true;
     };
 
     /**
@@ -165,8 +210,31 @@ namespace sparrow
         : m_name_list(to_vector<name_type>(std::move(names)))
         , m_array_list(to_vector<array>(std::move(columns)))
     {
-        init_array_map();
-        SPARROW_ASSERT_TRUE(check_consistency());
+        update_array_map_cache();
+    }
+
+    namespace detail
+    {
+        std::vector<record_batch::name_type> get_names(const std::vector<array>& array_list)
+        {
+            const auto names = array_list
+                               | std::views::transform(
+                                   [](const array& ar)
+                                   {
+                                       return ar.name().value();
+                                   }
+                               );
+            return {names.begin(), names.end()};
+        }
+    }
+
+    template <std::ranges::input_range CR>
+        requires std::same_as<std::ranges::range_value_t<CR>, array>
+    record_batch::record_batch(CR&& columns)
+        : m_name_list(detail::get_names(columns))
+        , m_array_list(to_vector<array>(std::move(columns)))
+    {
+        update_array_map_cache();
     }
 
     template <class U, class R>
@@ -211,4 +279,11 @@ struct std::formatter<sparrow::record_batch>
         return ctx.out();
     }
 };
+
+std::ostream& operator<<(std::ostream& os, const sparrow::record_batch& value)
+{
+    os << std::format("{}", value);
+    return os;
+}
+
 #endif
